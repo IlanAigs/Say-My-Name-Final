@@ -1,8 +1,3 @@
-###
-# This program will transform a name, as written by a student,
-# into the phonetic spelling and into spelling that can be accurately pronounced in English.
-###
-
 import csv
 import pandas as pd
 from g2p_en import G2p
@@ -20,7 +15,7 @@ phoneme_substitution = {
 }
 
 # Get the name as written by the student.
-def user_input():
+def get_user_input():
     return input("Enter your name: ")
 
 # Generate the phonetics
@@ -39,10 +34,8 @@ def transform_phonetics(phonetics):
 
     return transformed_phonetics.replace(" ", "")
 
-    return transformed_phonetics
-
-# Get the approval from the user
-def user_approval(user_input):
+# Get the user's approval
+def get_user_approval(user_input):
     approval = input(f'Is "{user_input}" the way your name is pronounced? Yes/No: ')
     return approval.lower() == 'yes'
 
@@ -51,8 +44,6 @@ def write_to_excel(data):
     filename = "ALL STUDENTS OCTOBER 17th.xlsx"
     columns = ["Original", "Phonetic", "Transformed"]
 
-    # If the file doesn't exist, it will be created as the value at the variable:
-    # filename in the "write_to_excel(data)" function, and the data added to it.
     if not os.path.isfile(filename):
         df = pd.DataFrame(columns=columns)
         df.to_excel(filename, index=False)
@@ -60,33 +51,29 @@ def write_to_excel(data):
     df = pd.read_excel(filename)
 
     data_dict = dict(zip(columns, data))
-    df = df.append(data_dict, ignore_index=True)
+    df = pd.concat([df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
     df.to_excel(filename, index=False)
     print("Data written to Excel.")
 
-# The sequence of running the program.
+# The main execution of the program.
 def main():
-    user_name = user_input()
+    user_name = get_user_input()
     phonetic_spelling_without_stress = generate_phonetic_spelling(user_name)
     transformed_phonetic = transform_phonetics(phonetic_spelling_without_stress)
 
-    # The results printed to the console
     print(f'Original input as spelled by the student: {user_name}')
     print(f'Phonetic spelling: {phonetic_spelling_without_stress}')
     print(f'The name as pronounced: {transformed_phonetic}')
 
-    # Add to the xlsx file the results if the user approves.
-    if user_approval(transformed_phonetic):
+    if get_user_approval(transformed_phonetic):
         write_to_excel([user_name, phonetic_spelling_without_stress, transformed_phonetic])
-    # If the user doesn't approve, use the phonetic spelling as corrected by the user.
-    # Print the results and add to the xlsx file.
     else:
         correct_phonetic = input("Please enter the correct phonetic spelling: ")
         transformed_phonetic = transform_phonetics(correct_phonetic)
 
         print(f'The corrected name as pronounced: {transformed_phonetic}')
 
-        if user_approval(transformed_phonetic):
+        if get_user_approval(transformed_phonetic):
             write_to_excel([user_name, phonetic_spelling_without_stress, transformed_phonetic])
         else:
             print("User did not approve. Data not written.")
