@@ -1,82 +1,211 @@
 import csv
-import pandas as pd
-from g2p_en import G2p
+from gtts import gTTS
 import os
+import pronouncing
+import streamlit as st
+import snowflake.connector
 
-# Transformation map.
-phoneme_substitution = {
-    'AA': 'a', 'AE': 'ae', 'AU': 'aow', 'AI': 'ayi', 'AO': 'aow', 'AY': 'ay', 'AH': 'ah',
-    'EE': 'ey', 'EA': 'eya', 'EU': 'aow', 'EI': 'eyee', 'EO': 'eow', 'EY': 'ey', 'EH': 'e',
-    'UU': 'oo', 'UA': 'owa', 'UE': 'owe', 'UI': 'yowi', 'UO': 'yoow', 'UY': 'yoy', 'UH': 'oo',
-    'II': 'e', 'IA': 'aiy', 'IE': 'aiye', 'IU': 'iyoo', 'IO': 'iyo', 'IY': 'eay', 'IH': 'aiy',
-    'OO': 'o', 'OA': 'owa', 'OU': 'owu', 'OI': 'oye', 'OE': 'owe', 'OY': 'oy', 'OH': 'oa',
-    'YA': 'ya', 'YE': 'ye', 'YU': 'yoo', 'YI': 'yi', 'YO': 'yo', 'YY': 'y', 'YH': 'ya',
-    'HA': 'ha', 'HE': 'he', 'HU': 'hoo', 'HI': 'hee', 'HO': 'ho', 'HY': 'hay', 'HH': 'ha'
-}
 
-# Get the name as written by the student.
-def get_user_input():
-    return input("Enter your name: ")
+class TextToSpeechConverter:
+    def __init__(self):
+        self.accent_options: dict[str, str] = {
+            "American English": "en",
+            "British English": "en-uk",
+            "Australian English": "en-au",
+            "Indian English": "en-in",
+            "Spanish": "es",
+            "Mexican Spanish": "es-mx",
+            "French": "fr",
+            "Canadian French": "fr-ca",
+            "German": "de",
+            "Italian": "it",
+            "Japanese": "ja",
+            "Portuguese": "pt",
+            "Brazilian Portuguese": "pt-br",
+            "Russian": "ru",
+            "Chinese (Simplified)": "zh",
+            "Chinese (Traditional)": "zh-tw",
+            "Korean": "ko",
+            "Arabic": "ar",
+            # Add more accent options as needed
+        }
 
-# Generate the phonetics
-def generate_phonetic_spelling(user_input):
-    g2p = G2p()
-    phonetic_spelling = g2p(user_input)
-    phonetic_spelling_without_stress = [phoneme.rstrip('012') for phoneme in phonetic_spelling]
-    return ' '.join(phonetic_spelling_without_stress)
+    st.session_state.first_name = ""
+    st.session_state.last_name = ""
+    st.session_state.student_id = ""
+    st.session_state.id_found = False 
+    student_id = ""
+    first_name = ""
+    last_name = ""
+    first_name_spelling = ""
+    
+    @staticmethod
+    def prompt_user_for_name() -> None:
+        name = st.text_input(
+            label="Student ID / Name",
+            placeholder="What is your name?",
+            key="name",
+            help="Type your Student ID or Name to confirm the phonetic",
+            disabled=st.session_state.disabled,
+        )
+        #if not name:
+            #st.warning("Please enter your name to proceed.")
 
-# Transform the phonetics using the transformation map.
-def transform_phonetics(phonetics):
-    transformed_phonetics = ''.join(phonetics).capitalize()
+    # end def
 
-    for original, replacement in phoneme_substitution.items():
-        transformed_phonetics = transformed_phonetics.replace(original.lower(), replacement)
+    @staticmethod
+    def get_phonetic_spelling() -> None:
+        if st.session_state.name:
+            name_id = st.session_state.name
+            st.session_state.first_name = ""
+            st.session_state.last_name = ""
+            st.session_state.student_id = ""  
+            st.session_state.id_found = False
+            if(name_id.isnumeric()):
+                conn = st.connection("snowflake")
+                try:                                    
+                    df = conn.query(f"SELECT * from students where student_id={st.session_state.name};")
+                    st.session_state.first_name = df['FIRST_NAME'][0]
+                    st.session_state.last_name = df['LAST_NAME'][0]
+                    st.session_state.student_id = df['STUDENT_ID'][0]
+                    st.session_state.id_found = True
+                except:  
+                    st.session_state.first_name = st.session_state.name
+                    st.session_state.last_name = ""
+                    st.session_state.student_id = ""  
+                    st.session_state.id_found = False
 
-    return transformed_phonetics.replace(" ", "")
+                st.session_state.phonetic_spelling = pronouncing.phones_for_word(st.session_state.first_name)                    
+                                      
+            else:
+                st.session_state.first_name = st.session_state.name
+                st.session_state.phonetic_spelling = pronouncing.phones_for_word(st.session_state.first_name)
 
-# Get the user's approval
-def get_user_approval(user_input):
-    approval = input(f'Is "{user_input}" the way your name is pronounced? Yes/No: ')
-    return approval.lower() == 'yes'
+            if st.session_state.phonetic_spelling and st.session_state.approval:
+                st.session_state.phonetic_spelling = "".join(
+                    char
+                    for char in st.session_state.phonetic_spelling[0]
+                    if char.isalpha()
+                )
+                st.session_state.satisfies_phonetic_spelling = True
 
-# Add the result to the xlsx file
-def write_to_excel(data):
-    filename = "ALL STUDENTS OCTOBER 17th.xlsx"
-    columns = ["Original", "Phonetic", "Transformed"]
+            if not st.session_state.phonetic_spelling:  
+                if not (st.session_state.id_found):
+                    st.warning("Student ID not found, correct and try again!.")
+                else:                                   
+                    st.warning("Hold on we are working on it.")
+                
 
-    if not os.path.isfile(filename):
-        df = pd.DataFrame(columns=columns)
-        df.to_excel(filename, index=False)
+            if not st.session_state.phonetic_spelling or not st.session_state.approval:
+                user_input = st.text_input(
+                    label="Phonetic Spelling",
+                    placeholder="Please enter the phonetic spelling ",
+                    help="Please provide the phonetic spelling for your name",
+                    disabled=st.session_state.disabled,
+                )
 
-    df = pd.read_excel(filename)
+                if not user_input:
+                    st.warning("Please enter the phonetic spelling manually.")
+                else:
+                    st.session_state.phonetic_spelling = user_input
 
-    data_dict = dict(zip(columns, data))
-    df = pd.concat([df, pd.DataFrame(data_dict, index=[0])], ignore_index=True)
-    df.to_excel(filename, index=False)
-    print("Data written to Excel.")
+                # end if
 
-# The main execution of the program.
-def main():
-    user_name = get_user_input()
-    phonetic_spelling_without_stress = generate_phonetic_spelling(user_name)
-    transformed_phonetic = transform_phonetics(phonetic_spelling_without_stress)
+            # end if
 
-    print(f'Original input as spelled by the student: {user_name}')
-    print(f'Phonetic spelling: {phonetic_spelling_without_stress}')
-    print(f'The name as pronounced: {transformed_phonetic}')
+        # end if
 
-    if get_user_approval(transformed_phonetic):
-        write_to_excel([user_name, phonetic_spelling_without_stress, transformed_phonetic])
-    else:
-        correct_phonetic = input("Please enter the correct phonetic spelling: ")
-        transformed_phonetic = transform_phonetics(correct_phonetic)
+    # end def
 
-        print(f'The corrected name as pronounced: {transformed_phonetic}')
+    @staticmethod
+    def display_phonetic_spelling() -> None:
+        if st.session_state.name and st.session_state.phonetic_spelling:
+            if (
+                    st.session_state.satisfies_phonetic_spelling
+                    and st.session_state.approval
+            ):
+                st.info(
+                    f"Phonetic spelling: {st.session_state.phonetic_spelling}"
+                )
 
-        if get_user_approval(transformed_phonetic):
-            write_to_excel([user_name, phonetic_spelling_without_stress, transformed_phonetic])
-        else:
-            print("User did not approve. Data not written.")
+            st.radio(
+                label="Are you happy with the phonetic spelling?",
+                key="approval",
+                options=[True, False],
+                format_func=lambda x: "Yes 😄" if x else "No ☹",
+            )
 
-if __name__ == "__main__":
-    main()
+            # end if
+
+        # end if
+
+    # end def
+
+    def prompt_user_for_accent(self):
+        if st.session_state.name and st.session_state.phonetic_spelling:
+            accent_key = st.selectbox(
+                label="Desire Accent",
+                options=list(self.accent_options.keys()),
+                key="accent_key",
+                index=None,
+                placeholder="Select an accent",
+                help="Select an accent",
+            )
+
+            if not accent_key:
+                st.warning("Please select an accent.")
+            else:
+                st.session_state.selected_accent = self.accent_options[accent_key]
+
+            # end if
+
+        # end if
+
+    # end def
+
+    @staticmethod
+    def convert_to_speech():
+        tts = gTTS(
+            text=st.session_state.first_name,
+            lang=st.session_state.selected_accent,
+        )
+        filename = f"{st.session_state.name}.mp3"
+        tts.save(filename)
+
+
+    @staticmethod
+    def save_to_csv():
+        data = [
+            (
+                st.session_state.name,
+                st.session_state.first_name,
+                st.session_state.last_name,
+                st.session_state.phonetic_spelling,
+                st.session_state.selected_accent,
+            )
+        ]
+        
+        try:            
+            conn = st.connection("snowflake",autocommit=True)        
+            cur = conn.cursor()      
+            sqlstr = f"UPDATE students SET first_name_spell='{st.session_state.phonetic_spelling}' " 
+            sqlstr += f"WHERE student_id={st.session_state.student_id};"
+            #st.warning(sqlstr)
+            cur.execute(sqlstr)
+            cur.close()
+        except:
+            st.warning(sqlstr)
+            #st.warning("Internet issue-refresh and try again")
+            
+
+        filename = f"{st.session_state.name}_data.csv"
+
+        with open(filename, mode="w", newline="") as file:
+            # comment: create the csv writer
+            writer = csv.writer(file)
+            writer.writerow(["Student ID / Name", "First Name", "Last Name", "Phonetic Spelling", "Selected Accent"])
+            writer.writerows(data)
+
+        # end with
+
+    # end def
